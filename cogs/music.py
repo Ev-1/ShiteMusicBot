@@ -35,6 +35,11 @@ class Music:
             bot.lavalink.add_node(**conf['lavalink nodes']['main'])
             bot.add_listener(bot.lavalink.voice_update_handler, 'on_socket_response')
 
+        with codecs.open("data/config.yaml", 'r', encoding='utf8') as f:
+            conf = yaml.safe_load(f)
+            self.spotify = conf["api keys"]["Spotify"]
+            self.youtube = conf["api keys"]["Youtube"]
+
     async def __before_invoke(self, ctx):
         if not ctx.guild:
             raise commands.NoPrivateMessage
@@ -53,6 +58,56 @@ class Music:
         """ Connects to the given voicechannel ID. A channel_id of `None` means disconnect. """
         ws = self.bot._connection._get_websocket(guild_id)
         await ws.voice_state(str(guild_id), channel_id)
+
+
+    @commands.command(name='splay')
+    async def _splay(self, ctx, *, query: str):
+        """ Searches and plays a song from a given query. """
+        player = self.bot.lavalink.players.get(ctx.guild.id)
+        self._info = {}
+        embed = discord.Embed(color=ctx.me.color)
+
+        print(f"querry: {query}")
+        name = await RoxUtils._Spotify.idfy(self, query)
+        print(f"name: {name}")
+        ids = await RoxUtils._Youtube.name2id(self, name)
+        print(f"ids: {ids}")
+
+        if ids == [None]:
+            return await ctx.send(ctx.localizer.format_str("{nothing_found}"))
+
+        print(len(ids))
+
+        if int(len(ids)) == 1:
+            print("single")
+            print(ids)
+            print(ids[0])
+            results = await player.node.get_tracks(ids[0])
+            print(results)
+            print(RoxUtils._Spotify._info)
+            track = results['tracks'][0]
+            await self.enqueue(ctx, track, embed)
+            embed.title = '{playlist_enqued}'
+            embed.description = f'yeetlist'
+        elif int(len(ids)) >= 1:
+            print("moar")
+            for _id in ids:
+                print(_id)
+                results = await player.node.get_tracks(_id)
+                track = results['tracks'][0]
+                player.add(requester=ctx.author.id, track=track)
+
+            embed.title = '{playlist_enqued}'
+            embed.description = f'yeetlist'
+        else:
+            print("none")
+            return await ctx.send(ctx.localizer.format_str("{nothing_found}"))
+
+        embed.title = '{Spotify queued!}'
+        await ctx.send(embed=embed)
+
+        if not player.is_playing:
+            await player.play()
 
     @commands.command(name='play')
     async def _play(self, ctx, *, query: str):
@@ -635,7 +690,7 @@ class Music:
         player = self.bot.lavalink.players.create(ctx.guild.id, endpoint=ctx.guild.region.value)
         # Create returns a player if one exists, otherwise creates.
 
-        should_connect = ctx.command.callback.__name__ in ('_play', '_find', '_search')  # Add commands that require joining voice to work.
+        should_connect = ctx.command.callback.__name__ in ('_play', '_find', '_search', '_splay')  # Add commands that require joining voice to work.
         without_connect = ctx.command.callback.__name__ in ('_queue', '_history', '_now') # Add commands that don't require the you being in voice.
 
         if without_connect:
