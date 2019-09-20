@@ -853,7 +853,6 @@ class Music(commands.Cog):
         try:
             reaction, user = await self.bot.wait_for('reaction_add', timeout=10.0, check=check)
         except asyncio.TimeoutError:
-            print(len(player.listeners))
             await msg.clear_reactions()
             embed.title = ''
             embed.description = '{time_expired}'
