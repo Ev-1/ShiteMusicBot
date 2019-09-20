@@ -6,7 +6,7 @@ import re
 import asyncio
 import yaml
 import codecs
-
+from pprint import pprint
 import lavalink
 import discord
 from discord.ext import commands
@@ -207,6 +207,7 @@ class Music(commands.Cog):
         position = timeformatter.format(player.position)
         if player.current.stream:
             duration = '{live}'
+            position = '{live}'
         else:
             duration = timeformatter.format(player.current.duration)
         song = f'**[{player.current.title}]({player.current.uri})**\n({position}/{duration})'
@@ -764,11 +765,18 @@ class Music(commands.Cog):
         player = self.bot.lavalink.player_manager.get(ctx.guild.id)
 
         maxlength = self.max_track_length(ctx.guild, player)
-        if maxlength and track['info']['length'] > maxlength:
-            embed.description = ctx.localizer.format_str("{enqueue.toolong}",
-                                                         _length=timeformatter.format(track['info']['length']),
-                                                         _max=timeformatter.format(maxlength))
-            return
+        if track['info']['isStream']:  # Also overriding some values for cleanliness
+            track['info']['length'] = 2
+            if not await self.vote(ctx, track, reason="queuing a stream"):
+                embed.description = "Not enough votes"
+                return
+        elif maxlength and track['info']['length'] > maxlength:
+            if not await self.vote(ctx, track, reason="queuing a track longer than the threshold"):
+                embed.description = "Not enough votes"
+            #embed.description = ctx.localizer.format_str("{enqueue.toolong}",
+            #                                             _length=timeformatter.format(track['info']['length']),
+            #                                             _max=timeformatter.format(maxlength))
+                return
 
         track, pos_global, pos_local = player.add(requester=ctx.author.id, track=track)
 
@@ -806,6 +814,55 @@ class Music(commands.Cog):
             return max(maxlength*60*1000/listeners, 60*10*1000)
         else:
             return maxlength*60*1000
+
+    async def vote(self, ctx, track, reason="something"):
+        player = self.bot.lavalink.player_manager.get(ctx.guild.id)
+        threshold = self.bot.settings.get(ctx.guild, 'vote_threshold', 'default_threshold')
+        voters = {"yes": [ctx.author.id], "no": []}
+        text = f"A vote for {reason} has been started"
+        track_name = track['info']['title']
+        track_uri = track['info']['uri']
+
+        song = f'**[{track_name}]({track_uri})**'
+        embed = discord.Embed(title=text, description=song, color=ctx.me.color)
+        embed.set_footer(text=f'{{requested_by}} {ctx.author.name}', icon_url=ctx.author.avatar_url)
+        msg = await ctx.send(embed=embed)
+
+        await msg.add_reaction('👍')
+        await msg.add_reaction('👎')
+
+        def check(reaction, user):
+            if len(voters['yes']) / len(player.listeners) >= threshold / 100:
+                print("yeet")
+                return True
+
+            if reaction.emoji == '🎵' and checks.is_DJ(ctx):
+                return True
+
+            if user is None or user.id == ctx.author.id or user.id == ctx.bot.user.id:
+                return False
+
+            if reaction.emoji == '👍' and user.id not in voters:
+                voters['yes'].append(user.id)
+                return False
+
+            if reaction.emoji == '👎' and user.id not in voters:
+                voters['no'].append(user.id)
+                return False
+
+        try:
+            reaction, user = await self.bot.wait_for('reaction_add', timeout=10.0, check=check)
+        except asyncio.TimeoutError:
+            print(len(player.listeners))
+            await msg.clear_reactions()
+            embed.title = ''
+            embed.description = '{time_expired}'
+            embed = ctx.localizer.format_embed(embed)
+            await msg.edit(embed=embed)
+            return False
+        else:
+            await msg.delete()
+            return True
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, err):
